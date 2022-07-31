@@ -1,0 +1,9 @@
+[package]
+name = "flocking-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+nannou = "0.18.1"
+nannou_wgpu = "0.18.0"
+rand = "0.8.5"
