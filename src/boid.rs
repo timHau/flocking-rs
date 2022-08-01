@@ -1,14 +1,16 @@
+use super::{HEIGHT, WIDTH};
+use kd_tree::{KdPoint, KdTree};
 use nannou::prelude::*;
 use rand::Rng;
 use wgpu::Texture;
 
-pub const NUM_POINTS: usize = 500;
+pub const NUM_POINTS: usize = 900;
 const MAX_FORCE: f32 = 0.03;
 const MAX_SPEED: f32 = 2.8;
-const DESIRED_SEPARATION: f32 = 30.0;
-const ALIGN_NEIGHBOR_DISTANCE: f32 = 50.0;
-const COHESION_NEIGHBOR_DISTANCE: f32 = 50.0;
-const BOID_RADIUS: f32 = 20.0;
+const SEPARATION_RADIUS: f32 = 25.0;
+const ALIGNMENT_RADIUS: f32 = 20.0;
+const COHESION_RADIUS: f32 = 20.0;
+const BOID_RADIUS: f32 = 8.0;
 
 #[derive(Clone, Debug)]
 pub struct Boid {
@@ -19,14 +21,11 @@ pub struct Boid {
 }
 
 impl Boid {
-    pub fn rand_new(app: &App) -> Self {
-        let [width, height] = app.window_rect().wh().to_array();
+    pub fn rand_new() -> Self {
         let mut rng = rand::thread_rng();
-        let rand_range_width = (-width / 2.0)..=(width / 2.0);
-        let rand_range_height = (-height / 2.0)..=(height / 2.0);
         let position = Point2::new(
-            rng.gen_range(rand_range_width),
-            rng.gen_range(rand_range_height),
+            rng.gen_range(-(WIDTH as f32 / 2.0)..=(WIDTH as f32 / 2.0)),
+            rng.gen_range(-(HEIGHT as f32 / 2.0)..=(HEIGHT as f32 / 2.0)),
         );
         let velocity = Point2::new(
             rng.gen_range(-MAX_SPEED..MAX_SPEED),
@@ -53,13 +52,15 @@ impl Boid {
         self.acceleration += force;
     }
 
-    fn separate(&self, boids: &[Boid]) -> Point2 {
+    fn separate(&self, kd_tree: &KdTree<Boid>) -> Point2 {
         let mut steer = Point2::new(0.0, 0.0);
         let mut count = 0;
-        for other in boids {
+        let neighbors =
+            kd_tree.within_radius(&[self.position.x, self.position.y], SEPARATION_RADIUS);
+        for other in neighbors {
             let d = self.position - other.position;
             let distance = d.length();
-            if distance > 0.0 && distance < DESIRED_SEPARATION {
+            if distance > 0.0 && distance < SEPARATION_RADIUS {
                 let diff = d / distance;
                 steer += diff;
                 count += 1;
@@ -80,13 +81,15 @@ impl Boid {
         steer
     }
 
-    fn align(&self, boids: &[Boid]) -> Point2 {
+    fn align(&self, kd_tree: &KdTree<Boid>) -> Point2 {
         let mut sum = Point2::new(0.0, 0.0);
         let mut count = 0;
-        for other in boids {
+        let neighbors =
+            kd_tree.within_radius(&[self.position.x, self.position.y], ALIGNMENT_RADIUS);
+        for other in neighbors {
             let d = self.position - other.position;
             let distance = d.length();
-            if distance > 0.0 && distance < ALIGN_NEIGHBOR_DISTANCE {
+            if distance > 0.0 && distance < ALIGNMENT_RADIUS as f32 {
                 sum += other.velocity;
                 count += 1;
             }
@@ -104,13 +107,14 @@ impl Boid {
         }
     }
 
-    fn cohesion(&self, boids: &[Boid]) -> Point2 {
+    fn cohesion(&self, kd_tree: &KdTree<Boid>) -> Point2 {
         let mut sum = Point2::new(0.0, 0.0);
         let mut count = 0;
-        for other in boids {
+        let neighbors = kd_tree.within_radius(&[self.position.x, self.position.y], COHESION_RADIUS);
+        for other in neighbors {
             let d = self.position - other.position;
             let distance = d.length();
-            if distance > 0.0 && distance < COHESION_NEIGHBOR_DISTANCE {
+            if distance > 0.0 && distance < COHESION_RADIUS as f32 {
                 sum += other.position;
                 count += 1;
             }
@@ -133,15 +137,15 @@ impl Boid {
         steer
     }
 
-    fn flock(&mut self, boids: &[Boid]) {
-        let mut separation = self.separate(boids);
-        let mut alignment = self.align(boids);
-        let mut cohesion = self.cohesion(boids);
+    fn flock(&mut self, kd_tree: &KdTree<Boid>) {
+        let mut separation = self.separate(kd_tree);
+        let mut alignment = self.align(kd_tree);
+        let mut cohesion = self.cohesion(kd_tree);
 
         // weight forces
-        separation = separation * 1.9;
-        alignment = alignment * 1.0;
-        cohesion = cohesion * 1.0;
+        separation = separation * 2.0;
+        alignment = alignment * 1.5;
+        cohesion = cohesion * 1.3;
 
         self.apply_force(separation);
         self.apply_force(alignment);
@@ -155,8 +159,8 @@ impl Boid {
         self.acceleration *= 0.0;
     }
 
-    fn check_borders(&mut self, app: &App) {
-        let [width, height] = app.window_rect().wh().to_array();
+    fn check_borders(&mut self) {
+        let [width, height] = [WIDTH as f32, HEIGHT as f32];
         let [x, y] = self.position.to_array();
         if x > width / 2.0 {
             self.position.x = -width / 2.0;
@@ -170,10 +174,22 @@ impl Boid {
         }
     }
 
-    pub fn step(&mut self, boids: &[Boid], app: &App) {
-        self.flock(boids);
+    pub fn step(&mut self, kd_tree: &KdTree<Boid>) {
+        self.flock(kd_tree);
         self.update();
-        self.check_borders(app);
+        self.check_borders();
+    }
+}
+
+impl KdPoint for Boid {
+    type Scalar = f32;
+    type Dim = typenum::U2;
+    fn at(&self, k: usize) -> Self::Scalar {
+        match k {
+            0 => self.position.x,
+            1 => self.position.y,
+            _ => panic!("Invalid index"),
+        }
     }
 }
 

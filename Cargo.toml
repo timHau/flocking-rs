@@ -1,9 +1,10 @@
 [package]
-name = "flocking-rs"
+name = "flocking"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+kd-tree = "0.4.1"
 nannou = "0.18.1"
-nannou_wgpu = "0.18.0"
 rand = "0.8.5"
+typenum = "1.15.0"
